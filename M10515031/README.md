@@ -1,4 +1,4 @@
-# KDD_MostGodTroll
+# KDD
 ## main_task.py
 將不同道路分開
 
