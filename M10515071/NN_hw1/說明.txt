@@ -1,0 +1,11 @@
+submission_tt_0412.csv ----> 比賽上傳數據
+
+kdd_tt_usetf.py ----> 主程式
+
+
+NN-hw1.ppt ----> 0413報告投影片
+
+
+
+
+其餘皆為資料處理
