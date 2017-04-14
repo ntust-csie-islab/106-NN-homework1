@@ -1,0 +1,114 @@
+
+
+CREATE TABLE train_avgtime AS   
+SELECT `intersection_id` , `tollgate_id` ,`dayweek`,`starting_day` , `starting_timerange` , test, avg( `travel_time` ) AS avgtime ,count(*) as countv
+FROM `trajectories`
+WHERE test IS NOT NULL
+GROUP BY `intersection_id` , `tollgate_id` , `starting_day` , `starting_timerange`;
+ 
+
+CREATE TABLE train_pre AS    
+SELECT `intersection_id` , `tollgate_id` ,`dayweek`, `starting_day` , `train` , avg( `travel_time` ) AS preavgtime
+FROM `trajectories`
+WHERE train IS NOT NULL
+GROUP BY `intersection_id` , `tollgate_id` , `starting_day` , `train` ;
+
+##################################
+
+create table trainraw as
+SELECT `train_avgtime`.intersection_id, `train_avgtime`.tollgate_id, `train_avgtime`.dayweek, `train_avgtime`.`starting_day` , `train_avgtime`.starting_timerange, `train_avgtime`.`avgtime` , `train_pre`.`preavgtime` , `static_model`.`static_avgtime`,`train_avgtime`.test,
+concat(trim(`static_model`.intersection_id),';',trim(`static_model`.tollgate_id),';',time_window) AS uniqid
+FROM `train_avgtime`
+LEFT JOIN `train_pre`
+ ON `train_avgtime`.starting_day = `train_pre`.starting_day
+AND `train_avgtime`.intersection_id = `train_pre`.intersection_id
+AND `train_avgtime`.tollgate_id = `train_pre`.tollgate_id
+AND `train_avgtime`.dayweek = `train_pre`.dayweek
+AND `train_avgtime`.test = `train_pre`.train
+LEFT JOIN `static_model` 
+ ON `train_avgtime`.dayweek = `static_model`.dayweek
+AND `train_avgtime`.intersection_id = `static_model`.intersection_id
+AND `train_avgtime`.tollgate_id = `static_model`.tollgate_id
+AND `train_avgtime`.starting_timerange = `static_model`.starting_timerange
+WHERE train_pre.`preavgtime` is not NULL ;
+
+
+######### add weather ###################
+
+
+###train data
+python /root/acer/command/csv2db.py conf.php table7.csv
+
+CREATE TABLE weather_raw AS 
+SELECT replace(  `"date"` , "'", "" ) AS date, replace(  `"hour"` , "'", "" ) AS hour, replace(  `"pressure"` , "'", "" ) AS pressure, replace(  `"sea_pressure"` , "'", "" ) AS sea_pressure, replace(  `"wind_direction"` , "'", "" ) AS wind_direction, replace( `"wind_speed"` , "'", "" ) AS wind_speed, replace(  `"temperature"` , "'", "" ) AS temperature, replace(  `"rel_humidity"` , "'", "" ) AS rel_humidity, replace(  `"precipitation"` , "'", "" ) AS precipitation
+FROM `table7.csv`
+
+create table weather as  
+SELECT `date`,
+CASE HOUR
+WHEN 9 THEN 1
+WHEN 18 THEN 2
+END AS wtest, 
+`pressure` , `sea_pressure` , `wind_direction` , `wind_speed` , `temperature` , `rel_humidity` , `precipitation`
+FROM `weather_raw` 
+where date > '2016-07-18';
+ 
+create table weather_train as
+SELECT * FROM `weather` WHERE  
+wtest is not NULL;
+
+ALTER TABLE `weather_train` CHANGE `date` `date` VARCHAR( 10 ) CHARACTER SET utf8 COLLATE utf8_general_ci NULL DEFAULT NULL ;
+ALTER TABLE `weather_train` CHANGE `wtest` `wtest` VARCHAR( 10 ) CHARACTER SET utf8 COLLATE utf8_general_ci NULL DEFAULT NULL ;
+ALTER TABLE `weather_train` CHANGE `pressure` `pressure` FLOAT NULL DEFAULT NULL ;
+ALTER TABLE `weather_train` CHANGE `sea_pressure` `sea_pressure` FLOAT NULL DEFAULT NULL ;
+ALTER TABLE `weather_train` CHANGE `wind_direction` `wind_direction` FLOAT NULL DEFAULT NULL ;
+ALTER TABLE `weather_train` CHANGE `wind_speed` `wind_speed` FLOAT NULL DEFAULT NULL ;
+ALTER TABLE `weather_train` CHANGE `temperature` `temperature` FLOAT NULL DEFAULT NULL ;
+ALTER TABLE `weather_train` CHANGE `rel_humidity` `rel_humidity` FLOAT NULL DEFAULT NULL ;
+ALTER TABLE `weather_train` CHANGE `precipitation` `precipitation` FLOAT NULL DEFAULT NULL ;
+ 
+
+
+######### output dataset csv like below ######### 
+
+SELECT avgtime, `preavgtime` , `static_avgtime` , if( intersection_id = 'A', 1, 0 ) AS ia, if( intersection_id = 'B', 1, 0 ) AS ib, if( intersection_id = 'C', 1, 0 ) AS ic, if( tollgate_id =1, 1, 0 ) AS t1, if( tollgate_id =2, 1, 0 ) AS t2, if( tollgate_id =3, 1, 0 ) AS t3, if( starting_timerange = '08:00', 1, 0 ) AS '0800', if( starting_timerange = '08:20', 1, 0 ) AS '0820', if( starting_timerange = '08:40', 1, 0 ) AS '0840', if( starting_timerange = '09:00', 1, 0 ) AS '0900', if( starting_timerange = '09:20', 1, 0 ) AS '0920', if( starting_timerange = '09:40', 1, 0 ) AS '0940', if( starting_timerange = '17:00', 1, 0 ) AS '1700', if( starting_timerange = '17:20', 1, 0 ) AS '1720', if( starting_timerange = '17:40', 1, 0 ) AS '1740', if( starting_timerange = '18:00', 1, 0 ) AS '1800', if( starting_timerange = '18:20', 1, 0 ) AS '1820', if( starting_timerange = '18:40', 1, 0 ) AS '1840',
+if( dayweek = 0, 1, 0 ) AS 'w0',
+if( dayweek = 1, 1, 0 ) AS 'w1',
+if( dayweek = 2, 1, 0 ) AS 'w2',
+if( dayweek = 3, 1, 0 ) AS 'w3',
+if( dayweek = 4, 1, 0 ) AS 'w4',
+if( dayweek = 5, 1, 0 ) AS 'w5',
+if( dayweek = 6, 1, 0 ) AS 'w6'
+FROM `trainraw` 
+
+
+or
+
+SELECT `uniqid` ,   `preavgtime` , `static_avgtime`
+FROM `trainraw` 
+  
+or
+
+SELECT `uniqid` , `avgtime` , `preavgtime` , `static_avgtime` , `pressure` , `sea_pressure` , `wind_direction` , `wind_speed` , `temperature` , `rel_humidity` , `precipitation`
+FROM `trainraw`
+LEFT JOIN weather_train ON starting_day = date
+AND test = wtest
+WHERE date IS NOT NULL 
+
+or
+
+SELECT `uniqid` , `avgtime` , `preavgtime` , `static_avgtime` , `pressure` , `sea_pressure` , `wind_direction` , `wind_speed` , `temperature` , `rel_humidity` , `precipitation`
+FROM `trainraw`
+LEFT JOIN weather_train ON starting_day = date
+AND test = wtest
+WHERE date IS NOT NULL 
+
+SELECT `uniqid` , `avgtime` , `preavgtime` , `static_avgtime` , `pressure` , `sea_pressure` , `wind_speed` , `temperature` , `rel_humidity` , `precipitation`
+FROM `trainraw`
+LEFT JOIN weather_train ON starting_day = date
+AND test = wtest
+WHERE date IS NOT NULL 
+
+
+
+
