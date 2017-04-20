@@ -1,0 +1,180 @@
+
+cp dataSets/training/trajectories\(table\ 5\)_training.csv table5.csv
+cp trajectories\(table\ 5\)_test1.csv /root/kdd/table5test.csv
+cp volume\(table\ 6\)_test1.csv ../table6.csv
+cp volume\(table\ 6\)_test1.csv ../table6test.csv
+
+python /root/acer/command/csv2db.py conf.php table5.csv
+python /root/acer/command/csv2db.py conf.php table5test.csv
+python /root/acer/command/csv2db.py conf.php table6.csv
+python /root/acer/command/csv2db.py conf.php table6test.csv
+
+CREATE TABLE trajectories_raw AS 
+SELECT replace( `"intersection_id"` , "'", "" ) AS intersection_id, replace( `"tollgate_id"` , "'", "" ) AS tollgate_id, replace( `"vehicle_id"` , "'", "" ) AS vehicle_id, replace( `"starting_time"` , "'", "" ) AS starting_time, replace( `"travel_seq"` , "'", "" ) AS travel_seq, replace( `"travel_time"` , "'", "" ) AS travel_time
+FROM `table5.csv`
+
+CREATE TABLE trajectoriestest_raw AS
+SELECT replace( `"intersection_id"` , "'", "" ) AS intersection_id, replace(
+`"tollgate_id"` , "'", "" ) AS tollgate_id, replace( `"vehicle_id"` , "'", ""
+) AS vehicle_id, replace( `"starting_time"` , "'", "" ) AS starting_time,
+replace( `"travel_seq"` , "'", "" ) AS travel_seq, replace( `"travel_time"` ,
+"'", "" ) AS travel_time
+FROM `table5test.csv`
+
+
+CREATE TABLE volume_raw AS 
+SELECT replace( `"time"` , "'", "" ) AS time, replace( `"tollgate_id"` , "'", "" ) AS tollgate_id, replace( `"direction"` , "'", "" ) AS direction, replace( `"vehicle_model"` , "'", "" ) AS vehicle_model, replace( `"has_etc"`, "'", "" ) AS has_etc, replace( `"vehicle_type"` , "'", "" ) AS vehicle_type
+FROM `table6.csv`
+
+CREATE TABLE volumetest_raw AS 
+SELECT replace( `"time"` , "'", "" ) AS time, replace( `"tollgate_id"` , "'", "" ) AS tollgate_id, replace( `"direction"` , "'", "" ) AS direction, replace( `"vehicle_model"` , "'", "" ) AS vehicle_model, replace( `"has_etc"`, "'", "" ) AS has_etc, replace( `"vehicle_type"` , "'", "" ) AS vehicle_type
+FROM `table6test.csv`
+
+#####
+
+create table trajectories as 
+select 
+`intersection_id`,
+`tollgate_id`,
+`vehicle_id`,
+`starting_time`,
+DATE_FORMAT( `starting_time` , '%Y-%m-%d' ) AS starting_day,
+DATE_FORMAT(`starting_time` , '%w' )as dayweek, 
+DATE_FORMAT(`starting_time` , '%H' )as hour,
+CASE DATE_FORMAT(`starting_time` , '%H' )
+  WHEN '06' THEN '1'
+  WHEN '07' THEN '1'
+  WHEN '15' THEN '2'
+  WHEN '16' THEN '2'
+ END AS train,
+CASE DATE_FORMAT(`starting_time` , '%H' )
+  WHEN '08' THEN '1'
+  WHEN '09' THEN '1'
+  WHEN '17' THEN '2'
+  WHEN '18' THEN '2'
+ END AS test,
+replace( concat( DATE_FORMAT( `starting_time` , '%H' ) , ':', floor(DATE_FORMAT( `starting_time` , '%i' ) /20 ) *20 ) , ':0', ':00' ) AS starting_timerange, 
+replace( concat( DATE_FORMAT( FROM_UNIXTIME( (UNIX_TIMESTAMP( `starting_time` ) +1200 ) ) , '%H' ) , ':', floor(DATE_FORMAT( FROM_UNIXTIME( (UNIX_TIMESTAMP( `starting_time` ) +1200 ) ) , '%i' ) /20 ) *20), ':0', ':00') AS ending_timerange,
+`travel_seq`,
+`travel_time` 
+from trajectories_raw
+
+create table trajectories_main as 
+SELECT * FROM `trajectories` where hour='06' or hour='07' or hour='08' or hour='09' or hour='15' or hour='16' or hour='17' or hour='18'
+
+
+create table volume as 
+select 
+`tollgate_id`,
+`direction`,
+`time`,
+DATE_FORMAT( `time` , '%Y-%m-%d' ) AS starting_day,
+DATE_FORMAT(`time` , '%w' )as dayweek, 
+DATE_FORMAT(`time` , '%H' )as hour,
+CASE DATE_FORMAT(`time` , '%H' )
+  WHEN '06' THEN '1'
+  WHEN '07' THEN '1'
+  WHEN '15' THEN '2'
+  WHEN '16' THEN '2'
+ END AS train,
+CASE DATE_FORMAT(`time` , '%H' )
+  WHEN '08' THEN '1'
+  WHEN '09' THEN '1'
+  WHEN '17' THEN '2'
+  WHEN '18' THEN '2'
+ END AS test,
+replace( concat( DATE_FORMAT( `time` , '%H' ) , ':', floor(DATE_FORMAT( `time` , '%i' ) /20 ) *20 ) , ':0', ':00' ) AS starting_timerange, 
+replace( concat( DATE_FORMAT( FROM_UNIXTIME( (UNIX_TIMESTAMP( `time` ) +1200 ) ) , '%H' ) , ':', floor(DATE_FORMAT( FROM_UNIXTIME( (UNIX_TIMESTAMP( `time` ) +1200 ) ) , '%i' ) /20 ) *20), ':0', ':00') AS ending_timerange,
+`has_etc`,
+`vehicle_type`
+from volume_raw;
+ALTER TABLE `volume` CHANGE `has_etc` `has_etc` INT NULL DEFAULT NULL ;
+ALTER TABLE `volume` CHANGE `vehicle_type` `vehicle_type` INT NULL DEFAULT NULL ;
+
+
+
+#predict by avg
+create table static_model as   
+select 
+ intersection_id,
+ tollgate_id,
+ concat('"[',futureday,' ',starting_timerange,':00,',futureday,' ',ending_timerange,':00)"')as time_window,
+ round(static_avgtime,2) as travel_time,
+ dayweek,
+ starting_timerange,
+ test,
+ static_avgtime
+from(
+ SELECT intersection_id, tollgate_id, dayweek,
+  starting_timerange,ending_timerange,test, avg( travel_time ) AS
+  static_avgtime,   
+  CASE dayweek
+   WHEN 2 THEN '2016-10-18'
+   WHEN 3 THEN '2016-10-19'
+   WHEN 4 THEN '2016-10-20'
+   WHEN 5 THEN '2016-10-21'
+   WHEN 6 THEN '2016-10-22'
+   WHEN 0 THEN '2016-10-23'
+   WHEN 1 THEN '2016-10-24'
+   END AS futureday
+  FROM `trajectories`
+  WHERE test IS NOT NULL
+  GROUP BY intersection_id, tollgate_id, starting_timerange, dayweek
+ )as t
+
+create table static_model_volume as   
+select 
+ tollgate_id,
+ direction,
+ concat('"[',futureday,' ',starting_timerange,':00,',futureday,' ',ending_timerange,':00)"')as time_window,
+ round(avg(count_volume)) as volume,
+ dayweek,
+ starting_timerange,
+ test,
+ avg(countetc)as avg_countetc,
+ avg(countcargo)as avg_countcargo,
+ avg(count_volume)as static_volume
+from(
+ SELECT starting_day,tollgate_id, direction, dayweek,
+  starting_timerange,ending_timerange,test, 
+  count(*) AS count_volume,   
+  sum(`has_etc`) AS countetc,
+  sum(`vehicle_type`) AS countcargo,  
+  CASE dayweek
+   WHEN 2 THEN '2016-10-18'
+   WHEN 3 THEN '2016-10-19'
+   WHEN 4 THEN '2016-10-20'
+   WHEN 5 THEN '2016-10-21'
+   WHEN 6 THEN '2016-10-22'
+   WHEN 0 THEN '2016-10-23'
+   WHEN 1 THEN '2016-10-24'
+   END AS futureday
+  FROM `volume`
+  WHERE test IS NOT NULL
+  GROUP BY  tollgate_id,direction, starting_timerange, dayweek, starting_day
+ )as t
+group by tollgate_id,direction, starting_timerange, dayweek
+
+##########output 
+
+select 
+ intersection_id,
+ tollgate_id,
+ time_window,
+ travel_time 
+from static_model
+
+select 
+ tollgate_id,
+ time_window,
+ direction,
+ volume 
+from static_model_volume
+
+##################################################################################combine weather
+
+ 
+
+
+
+
